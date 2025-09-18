@@ -34,17 +34,30 @@ class Westernbid_Starter_StripeCancelModuleFrontController extends ModuleFrontCo
     {
         // @todo Use a transaction identifier instead, this is just an example
         $id_order = (int) Tools::getValue('id_order');
+        $reason = Tools::getValue('reason');
+
+        if ('' === trim($reason)) {
+            $reason = 'customer_cancel';
+        }
 
         // Order is already saved in PrestaShop
         if (false === empty($id_order)) {
             $order = new Order($id_order);
 
             if (false === Validate::isLoadedObject($order)) {
+                $this->module->logEvent('cancel_failed', [
+                    'order_id' => $id_order,
+                    'reason' => 'order_not_found',
+                ]);
                 // Order not found
                 Tools::redirect($this->context->link->getPageLink('index'));
             }
 
             if (false === $this->isRequestAuthorized($order)) {
+                $this->module->logEvent('cancel_failed', [
+                    'order_id' => $id_order,
+                    'reason' => 'unauthorized',
+                ]);
                 header('HTTP/1.1 403 Forbidden');
 
                 exit;
@@ -62,9 +75,19 @@ class Westernbid_Starter_StripeCancelModuleFrontController extends ModuleFrontCo
                 $this->module->sendOrderCancelledEmail($order);
             }
 
+            $this->module->logEvent('payment_cancelled', [
+                'order_id' => $id_order,
+                'reason' => $reason,
+            ]);
+
 
             Tools::redirect($this->context->link->getPageLink('index'));
         }
+
+        $this->module->logEvent('cancel_failed', [
+            'order_id' => null,
+            'reason' => 'missing_order_id',
+        ]);
 
         // Order not saved, redirect to Payment step
         Tools::redirect($this->context->link->getPageLink(

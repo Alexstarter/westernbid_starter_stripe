@@ -47,6 +47,10 @@ class Westernbid_Starter_StripeCronModuleFrontController extends ModuleFrontCont
 
         if (!$tokensMatch) {
             header('HTTP/1.1 403 Forbidden');
+            $this->module->logEvent('auto_cancel_denied', [
+                'context' => 'cron',
+                'reason' => 'invalid_token',
+            ]);
             $this->ajaxDie(json_encode([
                 'status' => 'error',
                 'message' => 'Invalid token',
@@ -54,6 +58,11 @@ class Westernbid_Starter_StripeCronModuleFrontController extends ModuleFrontCont
         }
 
         $result = $this->module->cancelExpiredOrders('cron', true);
+
+        $this->module->logEvent('auto_cancel_summary', [
+            'context' => 'cron',
+            'result' => $result,
+        ]);
 
         $this->ajaxDie(json_encode($result));
     }

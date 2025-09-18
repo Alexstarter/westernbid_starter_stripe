@@ -102,4 +102,69 @@ class AdminConfigurePaymentWesternbidStripeController extends ModuleAdminControl
             ],
         ];
     }
+
+    public function postProcess()
+    {
+        if (Tools::isSubmit('downloadWesternbidLog')) {
+            $this->processLogDownload();
+
+            return;
+        }
+
+        parent::postProcess();
+    }
+
+    public function initContent()
+    {
+        $this->initToolbar();
+        $this->initPageHeaderToolbar();
+
+        $this->content = $this->renderConfigurationAndLogs();
+
+        parent::initContent();
+    }
+
+    protected function renderConfigurationAndLogs()
+    {
+        $filters = [
+            'date_from' => Tools::getValue('wb_log_date_from'),
+            'date_to' => Tools::getValue('wb_log_date_to'),
+            'order_id' => Tools::getValue('wb_log_order_id'),
+        ];
+
+        $logEntries = $this->module->getLogEntries($filters, 200);
+
+        $this->context->smarty->assign([
+            'configuration_form' => parent::renderOptions(),
+            'log_entries' => $logEntries,
+            'log_filters' => $filters,
+            'log_file_exists' => '' !== $this->module->getLogFilePath() && is_readable($this->module->getLogFilePath()),
+            'log_download_action' => $this->context->link->getAdminLink(Westernbid_Starter_Stripe::MODULE_ADMIN_CONTROLLER),
+            'log_filter_action' => $this->context->link->getAdminLink(Westernbid_Starter_Stripe::MODULE_ADMIN_CONTROLLER),
+            'controller_name' => Westernbid_Starter_Stripe::MODULE_ADMIN_CONTROLLER,
+            'token' => Tools::getAdminTokenLite(Westernbid_Starter_Stripe::MODULE_ADMIN_CONTROLLER),
+        ]);
+
+        return $this->context->smarty->fetch('module:westernbid_starter_stripe/views/templates/admin/configure.tpl');
+    }
+
+    protected function processLogDownload()
+    {
+        $path = $this->module->getLogFilePath();
+
+        if ('' === $path || !is_readable($path)) {
+            $this->errors[] = $this->l('Log file is not available.');
+
+            return;
+        }
+
+        $filename = 'westernbid_logs_' . date('Ymd_His') . '.log';
+
+        header('Content-Type: text/plain');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . filesize($path));
+
+        readfile($path);
+        exit;
+    }
 }

@@ -38,9 +38,18 @@ class Westernbid_Starter_StripeCallbackModuleFrontController extends ModuleFront
 
         $wb_hash = md5($wb_login.$wb_result.$secret_key.$mc_gross.$invoice);
 
+        $id_order = (int) Tools::getValue('id_order');
+
+        $this->module->logEvent('callback_received', [
+            'order_id' => $id_order,
+            'invoice' => $invoice,
+            'payment_status' => isset($data['payment_status']) ? $data['payment_status'] : null,
+            'wb_result' => $wb_result,
+            'hash_valid' => hash_equals($wb_hash, isset($data['wb_hash']) ? $data['wb_hash'] : ''),
+        ]);
+
         if ($wb_hash == $data['wb_hash'])
         {
-            $id_order = (int) Tools::getValue('id_order');
             // Completed
             if ($data['payment_status'] == 'Completed')
             {
@@ -60,7 +69,19 @@ class Westernbid_Starter_StripeCallbackModuleFrontController extends ModuleFront
                         $this->module->sendPaymentAcceptedEmail($order);
                     }
                 }
+
+                $this->module->logEvent('payment_completed', [
+                    'order_id' => $id_order,
+                    'invoice' => $invoice,
+                    'amount' => $mc_gross,
+                ]);
             }
+        } else {
+            $this->module->logEvent('callback_rejected', [
+                'order_id' => $id_order,
+                'invoice' => $invoice,
+                'reason' => 'hash_mismatch',
+            ]);
         }
         die();
     }
