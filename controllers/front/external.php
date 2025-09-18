@@ -104,7 +104,11 @@ class Westernbid_Starter_StripeExternalModuleFrontController extends ModuleFront
 
         // Параметри замовлення
         $payment_method = 'Western Bid Stripe';
-        $order_status_id = Configuration::get('PS_OS_PREPARATION'); // Ідентифікатор статусу замовлення
+        $order_status_id = (int) Configuration::get(Westernbid_Starter_Stripe::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+
+        if (!$order_status_id) {
+            $order_status_id = (int) Configuration::get('PS_OS_PREPARATION');
+        }
         $currency_id = (int)$currency->id;
 
         // Виклик validateOrder для підтвердження замовлення
