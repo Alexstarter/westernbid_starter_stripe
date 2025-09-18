@@ -68,8 +68,10 @@ class Westernbid_Starter_Stripe extends PaymentModule
         $this->controllers = [
             'account',
             'cancel',
+            'callback',
             'cron',
             'external',
+            'webhook',
             'validation',
         ];
 
@@ -165,6 +167,148 @@ class Westernbid_Starter_Stripe extends PaymentModule
         }
 
         @file_put_contents($path, $encoded . PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
+
+    /**
+     * Handle asynchronous notifications from WesternBid.
+     *
+     * @param array  $payload
+     * @param string $source
+     *
+     * @return array
+     */
+    public function handleWesternbidNotification(array $payload, $source = 'callback')
+    {
+        $source = (string) $source !== '' ? (string) $source : 'callback';
+
+        $invoice = isset($payload['invoice']) ? (string) $payload['invoice'] : '';
+        $idOrder = 0;
+
+        if (isset($payload['id_order']) && (int) $payload['id_order'] > 0) {
+            $idOrder = (int) $payload['id_order'];
+        } elseif (ctype_digit($invoice)) {
+            $idOrder = (int) $invoice;
+        }
+
+        $wbResult = isset($payload['wb_result']) ? (string) $payload['wb_result'] : '';
+        $mcGross = isset($payload['mc_gross']) ? (string) $payload['mc_gross'] : '';
+        $paymentStatus = isset($payload['payment_status']) ? (string) $payload['payment_status'] : '';
+        $receivedHash = isset($payload['wb_hash']) ? (string) $payload['wb_hash'] : '';
+
+        $secretKey = (string) Configuration::get(static::STARTER_WB_STRIPE_SECRETKEY);
+        $login = (string) Configuration::get(static::STARTER_WB_STRIPE_LOGIN);
+        $expectedHash = md5($login . $wbResult . $secretKey . $mcGross . $invoice);
+        $hashValid = hash_equals($expectedHash, $receivedHash);
+
+        $this->logEvent($source . '_received', [
+            'order_id' => $idOrder,
+            'invoice' => $invoice,
+            'payment_status' => $paymentStatus,
+            'wb_result' => $wbResult,
+            'hash_valid' => $hashValid,
+        ]);
+
+        if ($idOrder <= 0) {
+            $this->logEvent($source . '_rejected', [
+                'order_id' => $idOrder,
+                'invoice' => $invoice,
+                'reason' => 'missing_order_id',
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Missing order identifier',
+            ];
+        }
+
+        $order = new Order($idOrder);
+
+        if (!Validate::isLoadedObject($order)) {
+            $this->logEvent($source . '_rejected', [
+                'order_id' => $idOrder,
+                'invoice' => $invoice,
+                'reason' => 'order_not_found',
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Order not found',
+            ];
+        }
+
+        if (!$hashValid) {
+            $this->logEvent($source . '_rejected', [
+                'order_id' => $order->id,
+                'invoice' => $invoice,
+                'reason' => 'hash_mismatch',
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Invalid signature',
+            ];
+        }
+
+        if (0 !== strcasecmp($paymentStatus, 'Completed')) {
+            $this->logEvent($source . '_ignored', [
+                'order_id' => $order->id,
+                'invoice' => $invoice,
+                'payment_status' => $paymentStatus,
+            ]);
+
+            return [
+                'success' => true,
+                'message' => 'Notification ignored',
+            ];
+        }
+
+        $paidState = (int) Configuration::get('PS_OS_PAYMENT');
+
+        if ($paidState <= 0) {
+            $this->logEvent($source . '_rejected', [
+                'order_id' => $order->id,
+                'invoice' => $invoice,
+                'reason' => 'missing_paid_state',
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Unable to determine paid state',
+            ];
+        }
+
+        if ((int) $order->current_state === $paidState) {
+            $this->logEvent($source . '_duplicate', [
+                'order_id' => $order->id,
+                'invoice' => $invoice,
+            ]);
+
+            return [
+                'success' => true,
+                'message' => 'Order already marked as paid',
+            ];
+        }
+
+        $orderHistory = new OrderHistory();
+        $orderHistory->id_order = (int) $order->id;
+        $orderHistory->changeIdOrderState($paidState, (int) $order->id);
+        $orderHistory->add();
+
+        if ((bool) Configuration::get(static::STARTER_WB_STRIPE_PAYMENT_EMAIL_ENABLED)) {
+            $this->sendPaymentAcceptedEmail($order);
+        }
+
+        $this->logEvent('payment_completed', [
+            'order_id' => (int) $order->id,
+            'invoice' => $invoice,
+            'amount' => $mcGross,
+            'source' => $source,
+        ]);
+
+        return [
+            'success' => true,
+            'message' => 'Payment completed',
+        ];
     }
 
     /**
