@@ -48,6 +48,27 @@ class AdminConfigurePaymentWesternbidStripeController extends ModuleAdminControl
                         'cast' => 'intval',
                         'required' => false,
                     ],
+                    Westernbid_Starter_Stripe::STARTER_WB_STRIPE_WAITING_EMAIL_ENABLED => [
+                        'type' => 'bool',
+                        'title' => $this->l('Send email when order is waiting for WesternBid payment'),
+                        'validation' => 'isBool',
+                        'cast' => 'intval',
+                        'required' => false,
+                    ],
+                    Westernbid_Starter_Stripe::STARTER_WB_STRIPE_PAYMENT_EMAIL_ENABLED => [
+                        'type' => 'bool',
+                        'title' => $this->l('Send email when WesternBid payment is accepted'),
+                        'validation' => 'isBool',
+                        'cast' => 'intval',
+                        'required' => false,
+                    ],
+                    Westernbid_Starter_Stripe::STARTER_WB_STRIPE_CANCEL_EMAIL_ENABLED => [
+                        'type' => 'bool',
+                        'title' => $this->l('Send email when WesternBid payment is cancelled'),
+                        'validation' => 'isBool',
+                        'cast' => 'intval',
+                        'required' => false,
+                    ],
                     Westernbid_Starter_Stripe::STARTER_WB_STRIPE_LOGIN => [
                         'type' => 'text',
                         'title' => $this->l('Western bid LOGIN'),

@@ -1,0 +1,8 @@
+Hello {firstname} {lastname},
+
+Payment for order {order_reference} has been accepted.
+
+Your downloadable files are now available: {download_url}
+Review the order here: {order_url}
+
+Thank you for choosing {shop_name}.

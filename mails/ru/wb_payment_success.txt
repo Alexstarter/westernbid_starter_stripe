@@ -1,0 +1,8 @@
+Здравствуйте, {firstname} {lastname}!
+
+Оплата по заказу {order_reference} подтверждена.
+
+Файлы для скачивания: {download_url}
+Детали заказа: {order_url}
+
+Спасибо, что выбрали {shop_name}.

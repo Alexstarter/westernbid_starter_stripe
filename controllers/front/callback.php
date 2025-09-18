@@ -51,7 +51,15 @@ class Westernbid_Starter_StripeCallbackModuleFrontController extends ModuleFront
                     $id_order
                 );
 
-                $orderHistory->addWithemail(); 
+                $orderHistory->add();
+
+                if ((bool) Configuration::get(Westernbid_Starter_Stripe::STARTER_WB_STRIPE_PAYMENT_EMAIL_ENABLED)) {
+                    $order = new Order($id_order);
+
+                    if (Validate::isLoadedObject($order)) {
+                        $this->module->sendPaymentAcceptedEmail($order);
+                    }
+                }
             }
         }
         die();

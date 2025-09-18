@@ -1,0 +1,8 @@
+Hello {firstname} {lastname},
+
+Your order {order_reference} has been cancelled.
+
+Try to pay again: {retry_url}
+Review the order: {order_url}
+
+We are ready to help if you need any assistance.

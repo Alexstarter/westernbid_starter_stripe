@@ -1,0 +1,9 @@
+Вітаємо, {firstname} {lastname}!
+
+Ми отримали ваше замовлення {order_reference} від {order_date}. Зараз воно очікує підтвердження оплати WesternBid.
+
+Сума до оплати: {order_total}
+Стан замовлення: {order_url}
+
+З повагою,
+{shop_name}

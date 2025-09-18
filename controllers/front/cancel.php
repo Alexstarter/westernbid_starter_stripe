@@ -56,7 +56,11 @@ class Westernbid_Starter_StripeCancelModuleFrontController extends ModuleFrontCo
                 Configuration::get('PS_OS_CANCELED'),
                 $id_order
             );
-            $orderHistory->addWithemail();
+            $orderHistory->add();
+
+            if ((bool) Configuration::get(Westernbid_Starter_Stripe::STARTER_WB_STRIPE_CANCEL_EMAIL_ENABLED)) {
+                $this->module->sendOrderCancelledEmail($order);
+            }
 
 
             Tools::redirect($this->context->link->getPageLink('index'));
