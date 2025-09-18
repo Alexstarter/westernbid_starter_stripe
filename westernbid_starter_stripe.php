@@ -33,6 +33,8 @@ class Westernbid_Starter_Stripe extends PaymentModule
     const STARTER_WB_STRIPE_SECRETKEY = 'PAYMENT_STARTER_WB_STRIPE_SECRETKEY';
 
     const MODULE_ADMIN_CONTROLLER = 'AdminConfigurePaymentWesternbidStripe';
+    const STARTER_WB_STRIPE_WAITING_PAYMENT_STATE = 'STARTER_WB_STRIPE_WAITING_PAYMENT_STATE';
+    const STARTER_WB_STRIPE_WAITING_PAYMENT_NAME = 'Ожидание оплаты WesternBid';
     const HOOKS = [
         'paymentOptions',
     ];
@@ -70,6 +72,7 @@ class Westernbid_Starter_Stripe extends PaymentModule
         return (bool) parent::install()
             && (bool) $this->registerHook(static::HOOKS)
             && $this->installConfiguration()
+            && $this->installOrderState()
             && $this->installTabs();
     }
 
@@ -79,6 +82,7 @@ class Westernbid_Starter_Stripe extends PaymentModule
     public function uninstall()
     {
         return (bool) parent::uninstall()
+            && $this->uninstallOrderState()
             && $this->uninstallConfiguration()
             && $this->uninstallTabs();
     }
@@ -155,6 +159,97 @@ class Westernbid_Starter_Stripe extends PaymentModule
     private function uninstallConfiguration()
     {
         return (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_ENABLED);
+    }
+
+    /**
+     * Install order state used for unpaid WesternBid orders
+     *
+     * @return bool
+     */
+    private function installOrderState()
+    {
+        $orderStateId = (int) Configuration::get(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+
+        if ($orderStateId) {
+            $orderState = new OrderState($orderStateId);
+
+            if (Validate::isLoadedObject($orderState)) {
+                return true;
+            }
+        }
+
+        $existingOrderStateId = $this->findExistingOrderStateId();
+
+        if ($existingOrderStateId) {
+            return (bool) Configuration::updateValue(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE, (int) $existingOrderStateId);
+        }
+
+        $orderState = new OrderState();
+        $orderState->module_name = $this->name;
+        $orderState->send_email = 0;
+        $orderState->color = '#34209E';
+        $orderState->hidden = 0;
+        $orderState->logable = 0;
+        $orderState->invoice = 0;
+        $orderState->delivery = 0;
+        $orderState->shipped = 0;
+        $orderState->paid = 0;
+        $orderState->pdf_invoice = 0;
+        $orderState->pdf_delivery = 0;
+        $orderState->deleted = 0;
+        $orderState->unremovable = 0;
+
+        foreach (Language::getLanguages(false) as $language) {
+            $orderState->name[$language['id_lang']] = static::STARTER_WB_STRIPE_WAITING_PAYMENT_NAME;
+            $orderState->template[$language['id_lang']] = '';
+        }
+
+        if (!$orderState->add()) {
+            return false;
+        }
+
+        return (bool) Configuration::updateValue(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE, (int) $orderState->id);
+    }
+
+    /**
+     * Remove module order state
+     *
+     * @return bool
+     */
+    private function uninstallOrderState()
+    {
+        $orderStateId = (int) Configuration::get(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+
+        if ($orderStateId) {
+            $orderState = new OrderState($orderStateId);
+
+            if (Validate::isLoadedObject($orderState) && !$orderState->delete()) {
+                return false;
+            }
+
+            Configuration::deleteByName(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+        }
+
+        return true;
+    }
+
+    /**
+     * Try to find existing order state by configured name
+     *
+     * @return int
+     */
+    private function findExistingOrderStateId()
+    {
+        $defaultLanguageId = (int) Configuration::get('PS_LANG_DEFAULT');
+        $orderStates = OrderState::getOrderStates($defaultLanguageId);
+
+        foreach ($orderStates as $orderState) {
+            if ($orderState['name'] === static::STARTER_WB_STRIPE_WAITING_PAYMENT_NAME) {
+                return (int) $orderState['id_order_state'];
+            }
+        }
+
+        return 0;
     }
 
     /**
