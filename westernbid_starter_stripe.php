@@ -34,13 +34,20 @@ class Westernbid_Starter_Stripe extends PaymentModule
     const STARTER_WB_STRIPE_BLOCK_DOWNLOADS = 'STARTER_WB_STRIPE_BLOCK_DOWNLOADS';
     const STARTER_WB_STRIPE_AUTO_CANCEL_HOURS = 'STARTER_WB_STRIPE_AUTO_CANCEL_HOURS';
     const STARTER_WB_STRIPE_CRON_TOKEN = 'STARTER_WB_STRIPE_CRON_TOKEN';
+    const STARTER_WB_STRIPE_WAITING_EMAIL_ENABLED = 'STARTER_WB_STRIPE_WAITING_EMAIL_ENABLED';
+    const STARTER_WB_STRIPE_PAYMENT_EMAIL_ENABLED = 'STARTER_WB_STRIPE_PAYMENT_EMAIL_ENABLED';
+    const STARTER_WB_STRIPE_CANCEL_EMAIL_ENABLED = 'STARTER_WB_STRIPE_CANCEL_EMAIL_ENABLED';
 
     const MODULE_ADMIN_CONTROLLER = 'AdminConfigurePaymentWesternbidStripe';
     const STARTER_WB_STRIPE_WAITING_PAYMENT_STATE = 'STARTER_WB_STRIPE_WAITING_PAYMENT_STATE';
     const STARTER_WB_STRIPE_WAITING_PAYMENT_NAME = 'Ожидание оплаты WesternBid';
+    const WAITING_TEMPLATE = 'wb_waiting_payment';
+    const PAYMENT_TEMPLATE = 'wb_payment_success';
+    const CANCEL_TEMPLATE = 'wb_payment_cancelled';
     const HOOKS = [
         'paymentOptions',
         'actionFrontControllerAfterInit',
+        'actionValidateOrder',
     ];
 
     public function __construct()
@@ -156,7 +163,10 @@ class Westernbid_Starter_Stripe extends PaymentModule
         return (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_ENABLED, '1')
             && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_BLOCK_DOWNLOADS, '1')
             && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS, '24')
-            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_CRON_TOKEN, Tools::passwdGen(32));
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_CRON_TOKEN, Tools::passwdGen(32))
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_WAITING_EMAIL_ENABLED, '1')
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_PAYMENT_EMAIL_ENABLED, '1')
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_CANCEL_EMAIL_ENABLED, '1');
     }
 
     /**
@@ -169,7 +179,10 @@ class Westernbid_Starter_Stripe extends PaymentModule
         return (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_ENABLED)
             && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_BLOCK_DOWNLOADS)
             && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS)
-            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_CRON_TOKEN);
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_CRON_TOKEN)
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_WAITING_EMAIL_ENABLED)
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_PAYMENT_EMAIL_ENABLED)
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_CANCEL_EMAIL_ENABLED);
     }
 
     /**
@@ -344,6 +357,197 @@ class Westernbid_Starter_Stripe extends PaymentModule
     }
 
     /**
+     * Send notification after order validation if order created with waiting state.
+     *
+     * @param array $params
+     */
+    public function hookActionValidateOrder($params)
+    {
+        if (empty($params['order']) || !$params['order'] instanceof Order) {
+            return;
+        }
+
+        /** @var Order $order */
+        $order = $params['order'];
+
+        if ($order->module !== $this->name) {
+            return;
+        }
+
+        if (!(bool) Configuration::get(static::STARTER_WB_STRIPE_WAITING_EMAIL_ENABLED)) {
+            return;
+        }
+
+        $waitingState = (int) Configuration::get(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+
+        if ($waitingState > 0 && (int) $order->current_state === $waitingState) {
+            $this->sendWaitingPaymentEmail($order);
+        }
+    }
+
+    /**
+     * Send "waiting for payment" notification.
+     *
+     * @param Order $order
+     */
+    public function sendWaitingPaymentEmail(Order $order)
+    {
+        $this->sendOrderNotificationEmail($order, static::WAITING_TEMPLATE, 'Order %reference% received – awaiting payment confirmation', [
+            '{download_url}' => $this->getOrderLink($order),
+        ]);
+    }
+
+    /**
+     * Send payment accepted notification.
+     *
+     * @param Order $order
+     */
+    public function sendPaymentAcceptedEmail(Order $order)
+    {
+        $this->sendOrderNotificationEmail($order, static::PAYMENT_TEMPLATE, 'Payment received for order %reference%', [
+            '{download_url}' => $this->getOrderLink($order),
+        ]);
+    }
+
+    /**
+     * Send order cancelled notification.
+     *
+     * @param Order $order
+     */
+    public function sendOrderCancelledEmail(Order $order)
+    {
+        $retryUrl = $this->getOrderLink($order);
+
+        $this->sendOrderNotificationEmail($order, static::CANCEL_TEMPLATE, 'Order %reference% cancelled', [
+            '{retry_url}' => $retryUrl,
+            '{download_url}' => $retryUrl,
+        ]);
+    }
+
+    /**
+     * Compose and send notification email.
+     *
+     * @param Order  $order
+     * @param string $template
+     * @param string $subjectTemplate
+     * @param array  $additionalVars
+     *
+     * @return bool
+     */
+    private function sendOrderNotificationEmail(Order $order, $template, $subjectTemplate, array $additionalVars = [])
+    {
+        $customer = new Customer((int) $order->id_customer);
+
+        if (!Validate::isLoadedObject($customer)) {
+            return false;
+        }
+
+        $idLang = (int) $order->id_lang;
+        $language = new Language($idLang);
+        $currency = new Currency((int) $order->id_currency);
+        $link = $this->getContextLink();
+
+        $vars = [
+            '{firstname}' => $customer->firstname,
+            '{lastname}' => $customer->lastname,
+            '{order_reference}' => $order->reference,
+            '{order_date}' => Tools::displayDate($order->date_add, $idLang),
+            '{order_total}' => Tools::displayPrice($order->total_paid, $currency),
+            '{order_url}' => $this->getOrderLink($order),
+            '{shop_name}' => Configuration::get('PS_SHOP_NAME'),
+        ];
+
+        $vars = array_merge($vars, $additionalVars);
+
+        $subject = $this->buildMailSubject($template, $language, $order, $subjectTemplate);
+
+        return Mail::Send(
+            $idLang,
+            $template,
+            $subject,
+            $vars,
+            $customer->email,
+            trim($customer->firstname . ' ' . $customer->lastname),
+            null,
+            null,
+            null,
+            null,
+            $this->getMailTemplateBasePath(),
+            false,
+            (int) $order->id_shop
+        );
+    }
+
+    /**
+     * @param Order $order
+     *
+     * @return string
+     */
+    private function getOrderLink(Order $order)
+    {
+        $link = $this->getContextLink();
+
+        return $link->getPageLink('order-detail', true, (int) $order->id_lang, [
+            'id_order' => (int) $order->id,
+        ]);
+    }
+
+    /**
+     * @return Link
+     */
+    private function getContextLink()
+    {
+        if (null === $this->context || null === $this->context->link) {
+            return new Link();
+        }
+
+        return $this->context->link;
+    }
+
+    /**
+     * @return string
+     */
+    private function getMailTemplateBasePath()
+    {
+        return dirname(__FILE__) . '/mails/';
+    }
+
+    /**
+     * @param string   $template
+     * @param Language $language
+     * @param Order    $order
+     * @param string   $fallback
+     *
+     * @return string
+     */
+    private function buildMailSubject($template, Language $language, Order $order, $fallback)
+    {
+        $iso = Tools::strtolower($language->iso_code);
+        $reference = $order->reference;
+
+        $map = [
+            static::WAITING_TEMPLATE => [
+                'ru' => 'Заказ ' . $reference . ' получен — ожидаем оплату',
+                'uk' => 'Замовлення ' . $reference . ' отримано — очікуємо оплату',
+            ],
+            static::PAYMENT_TEMPLATE => [
+                'ru' => 'Оплата по заказу ' . $reference . ' принята',
+                'uk' => 'Оплату за замовлення ' . $reference . ' підтверджено',
+            ],
+            static::CANCEL_TEMPLATE => [
+                'ru' => 'Заказ ' . $reference . ' отменён',
+                'uk' => 'Замовлення ' . $reference . ' скасовано',
+            ],
+        ];
+
+        if (isset($map[$template][$iso])) {
+            return $map[$template][$iso];
+        }
+
+        return str_replace('%reference%', $reference, $fallback);
+    }
+
+    /**
      * Cancel unpaid orders that were not paid within configured number of hours.
      *
      * @param string $contextName   Describes who triggered the cancellation (cron, hook, etc.)
@@ -423,7 +627,11 @@ class Westernbid_Starter_Stripe extends PaymentModule
             $orderHistory = new OrderHistory();
             $orderHistory->id_order = $orderId;
             $orderHistory->changeIdOrderState($cancelState, $orderId);
-            $orderHistory->addWithemail();
+            $orderHistory->add();
+
+            if ((bool) Configuration::get(static::STARTER_WB_STRIPE_CANCEL_EMAIL_ENABLED)) {
+                $this->sendOrderCancelledEmail($order);
+            }
 
             $cancelledOrders[] = $orderId;
         }

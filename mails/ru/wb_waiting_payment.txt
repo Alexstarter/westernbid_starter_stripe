@@ -1,0 +1,9 @@
+Здравствуйте, {firstname} {lastname}!
+
+Мы получили ваш заказ {order_reference} от {order_date}. Сейчас он ожидает подтверждения оплаты WesternBid.
+
+Сумма к оплате: {order_total}
+Статус заказа: {order_url}
+
+С уважением,
+{shop_name}

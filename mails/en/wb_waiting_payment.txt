@@ -1,0 +1,9 @@
+Hello {firstname} {lastname},
+
+We have received your order {order_reference} on {order_date}. It is currently waiting for WesternBid payment confirmation.
+
+Order total: {order_total}
+Follow the status here: {order_url}
+
+Thank you,
+{shop_name}
