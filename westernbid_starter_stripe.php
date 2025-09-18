@@ -33,6 +33,7 @@ class Westernbid_Starter_Stripe extends PaymentModule
     const STARTER_WB_STRIPE_SECRETKEY = 'PAYMENT_STARTER_WB_STRIPE_SECRETKEY';
     const STARTER_WB_STRIPE_BLOCK_DOWNLOADS = 'STARTER_WB_STRIPE_BLOCK_DOWNLOADS';
     const STARTER_WB_STRIPE_AUTO_CANCEL_HOURS = 'STARTER_WB_STRIPE_AUTO_CANCEL_HOURS';
+    const STARTER_WB_STRIPE_CRON_TOKEN = 'STARTER_WB_STRIPE_CRON_TOKEN';
 
     const MODULE_ADMIN_CONTROLLER = 'AdminConfigurePaymentWesternbidStripe';
     const STARTER_WB_STRIPE_WAITING_PAYMENT_STATE = 'STARTER_WB_STRIPE_WAITING_PAYMENT_STATE';
@@ -57,6 +58,7 @@ class Westernbid_Starter_Stripe extends PaymentModule
         $this->controllers = [
             'account',
             'cancel',
+            'cron',
             'external',
             'validation',
         ];
@@ -153,7 +155,8 @@ class Westernbid_Starter_Stripe extends PaymentModule
     {
         return (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_ENABLED, '1')
             && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_BLOCK_DOWNLOADS, '1')
-            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS, '24');
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS, '24')
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_CRON_TOKEN, Tools::passwdGen(32));
     }
 
     /**
@@ -165,7 +168,8 @@ class Westernbid_Starter_Stripe extends PaymentModule
     {
         return (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_ENABLED)
             && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_BLOCK_DOWNLOADS)
-            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS);
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS)
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_CRON_TOKEN);
     }
 
     /**
@@ -336,16 +340,45 @@ class Westernbid_Starter_Stripe extends PaymentModule
             return;
         }
 
+        $this->cancelExpiredOrders('front_hook', false);
+    }
+
+    /**
+     * Cancel unpaid orders that were not paid within configured number of hours.
+     *
+     * @param string $contextName   Describes who triggered the cancellation (cron, hook, etc.)
+     * @param bool   $logWhenEmpty  Log message even if no orders were cancelled
+     *
+     * @return array
+     */
+    public function cancelExpiredOrders($contextName = 'manual', $logWhenEmpty = true)
+    {
         $autoCancelHours = (int) Configuration::get(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS);
 
         if ($autoCancelHours <= 0) {
-            return;
+            if ($logWhenEmpty) {
+                PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel skipped (%s): feature disabled', $contextName));
+            }
+
+            return [
+                'status' => 'skipped',
+                'cancelled' => 0,
+                'message' => 'Auto cancel disabled',
+            ];
         }
 
         $waitingState = (int) Configuration::get(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
 
         if ($waitingState <= 0) {
-            return;
+            if ($logWhenEmpty) {
+                PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel skipped (%s): waiting state missing', $contextName));
+            }
+
+            return [
+                'status' => 'skipped',
+                'cancelled' => 0,
+                'message' => 'Waiting order state missing',
+            ];
         }
 
         $deadline = date('Y-m-d H:i:s', time() - ($autoCancelHours * 3600));
@@ -360,10 +393,19 @@ class Westernbid_Starter_Stripe extends PaymentModule
         $orders = Db::getInstance()->executeS($query);
 
         if (empty($orders)) {
-            return;
+            if ($logWhenEmpty) {
+                PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel processed (%s): no orders to cancel', $contextName));
+            }
+
+            return [
+                'status' => 'success',
+                'cancelled' => 0,
+                'message' => 'No orders to cancel',
+            ];
         }
 
         $cancelState = (int) Configuration::get('PS_OS_CANCELED');
+        $cancelledOrders = [];
 
         foreach ($orders as $orderData) {
             $orderId = (int) $orderData['id_order'];
@@ -382,6 +424,21 @@ class Westernbid_Starter_Stripe extends PaymentModule
             $orderHistory->id_order = $orderId;
             $orderHistory->changeIdOrderState($cancelState, $orderId);
             $orderHistory->addWithemail();
+
+            $cancelledOrders[] = $orderId;
         }
+
+        if (!empty($cancelledOrders)) {
+            PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel processed (%s): cancelled orders %s', $contextName, implode(', ', $cancelledOrders)));
+        } elseif ($logWhenEmpty) {
+            PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel processed (%s): no orders cancelled (possibly updated meanwhile)', $contextName));
+        }
+
+        return [
+            'status' => 'success',
+            'cancelled' => count($cancelledOrders),
+            'orders' => $cancelledOrders,
+            'message' => empty($cancelledOrders) ? 'No orders cancelled' : 'Orders cancelled',
+        ];
     }
 }

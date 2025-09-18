@@ -67,6 +67,12 @@ class AdminConfigurePaymentWesternbidStripeController extends ModuleAdminControl
                         'required' => false,
                         'desc' => $this->l('Set 0 to disable automatic cancellation'),
                     ],
+                    Westernbid_Starter_Stripe::STARTER_WB_STRIPE_CRON_TOKEN => [
+                        'type' => 'text',
+                        'title' => $this->l('Cron security token'),
+                        'required' => true,
+                        'desc' => $this->l('Use this token in the cron URL: /module/westernbid_starter_stripe/cron?token=YOUR_TOKEN'),
+                    ],
 
                 ],
                 'submit' => [
