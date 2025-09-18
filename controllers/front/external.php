@@ -104,10 +104,20 @@ class Westernbid_Starter_StripeExternalModuleFrontController extends ModuleFront
 
         // Параметри замовлення
         $payment_method = 'Western Bid Stripe';
-        $order_status_id = (int) Configuration::get(Westernbid_Starter_Stripe::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+        $blockDownloads = (bool) Configuration::get(Westernbid_Starter_Stripe::STARTER_WB_STRIPE_BLOCK_DOWNLOADS);
 
-        if (!$order_status_id) {
-            $order_status_id = (int) Configuration::get('PS_OS_PREPARATION');
+        if ($blockDownloads) {
+            $order_status_id = (int) Configuration::get(Westernbid_Starter_Stripe::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+
+            if (!$order_status_id) {
+                $order_status_id = (int) Configuration::get('PS_OS_PREPARATION');
+            }
+        } else {
+            $order_status_id = (int) Configuration::get('PS_OS_PAYMENT');
+
+            if (!$order_status_id) {
+                $order_status_id = (int) Configuration::get('PS_OS_PREPARATION');
+            }
         }
         $currency_id = (int)$currency->id;
 
