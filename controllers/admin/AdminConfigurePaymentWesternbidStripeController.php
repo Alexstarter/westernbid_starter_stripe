@@ -41,6 +41,13 @@ class AdminConfigurePaymentWesternbidStripeController extends ModuleAdminControl
                         'cast' => 'intval',
                         'required' => false,
                     ],
+                    Westernbid_Starter_Stripe::STARTER_WB_STRIPE_BLOCK_DOWNLOADS => [
+                        'type' => 'bool',
+                        'title' => $this->l('Block downloads until payment is confirmed'),
+                        'validation' => 'isBool',
+                        'cast' => 'intval',
+                        'required' => false,
+                    ],
                     Westernbid_Starter_Stripe::STARTER_WB_STRIPE_LOGIN => [
                         'type' => 'text',
                         'title' => $this->l('Western bid LOGIN'),
@@ -51,6 +58,14 @@ class AdminConfigurePaymentWesternbidStripeController extends ModuleAdminControl
                         'type' => 'text',
                         'title' => $this->l('Western bid SECRET KEY'),
                         'required' => true,
+                    ],
+                    Westernbid_Starter_Stripe::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS => [
+                        'type' => 'text',
+                        'title' => $this->l('Auto cancel unpaid orders after N hours'),
+                        'validation' => 'isUnsignedInt',
+                        'cast' => 'intval',
+                        'required' => false,
+                        'desc' => $this->l('Set 0 to disable automatic cancellation'),
                     ],
 
                 ],

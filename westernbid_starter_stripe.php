@@ -31,12 +31,15 @@ class Westernbid_Starter_Stripe extends PaymentModule
 
     const STARTER_WB_STRIPE_LOGIN = 'PAYMENT_STARTER_WB_STRIPE_LOGIN';
     const STARTER_WB_STRIPE_SECRETKEY = 'PAYMENT_STARTER_WB_STRIPE_SECRETKEY';
+    const STARTER_WB_STRIPE_BLOCK_DOWNLOADS = 'STARTER_WB_STRIPE_BLOCK_DOWNLOADS';
+    const STARTER_WB_STRIPE_AUTO_CANCEL_HOURS = 'STARTER_WB_STRIPE_AUTO_CANCEL_HOURS';
 
     const MODULE_ADMIN_CONTROLLER = 'AdminConfigurePaymentWesternbidStripe';
     const STARTER_WB_STRIPE_WAITING_PAYMENT_STATE = 'STARTER_WB_STRIPE_WAITING_PAYMENT_STATE';
     const STARTER_WB_STRIPE_WAITING_PAYMENT_NAME = 'Ожидание оплаты WesternBid';
     const HOOKS = [
         'paymentOptions',
+        'actionFrontControllerAfterInit',
     ];
 
     public function __construct()
@@ -148,7 +151,9 @@ class Westernbid_Starter_Stripe extends PaymentModule
      */
     private function installConfiguration()
     {
-        return (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_ENABLED, '1');
+        return (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_ENABLED, '1')
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_BLOCK_DOWNLOADS, '1')
+            && (bool) Configuration::updateGlobalValue(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS, '24');
     }
 
     /**
@@ -158,7 +163,9 @@ class Westernbid_Starter_Stripe extends PaymentModule
      */
     private function uninstallConfiguration()
     {
-        return (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_ENABLED);
+        return (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_ENABLED)
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_BLOCK_DOWNLOADS)
+            && (bool) Configuration::deleteByName(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS);
     }
 
     /**
@@ -318,5 +325,63 @@ class Westernbid_Starter_Stripe extends PaymentModule
         }
 
         return false;
+    }
+
+    /**
+     * Cancel unpaid orders that expired according to configuration
+     */
+    public function hookActionFrontControllerAfterInit()
+    {
+        if (!Configuration::get(static::STARTER_WB_STRIPE_BLOCK_DOWNLOADS)) {
+            return;
+        }
+
+        $autoCancelHours = (int) Configuration::get(static::STARTER_WB_STRIPE_AUTO_CANCEL_HOURS);
+
+        if ($autoCancelHours <= 0) {
+            return;
+        }
+
+        $waitingState = (int) Configuration::get(static::STARTER_WB_STRIPE_WAITING_PAYMENT_STATE);
+
+        if ($waitingState <= 0) {
+            return;
+        }
+
+        $deadline = date('Y-m-d H:i:s', time() - ($autoCancelHours * 3600));
+
+        $query = new DbQuery();
+        $query->select('o.id_order');
+        $query->from('orders', 'o');
+        $query->where('o.current_state = ' . (int) $waitingState);
+        $query->where("o.module = '" . pSQL($this->name) . "'");
+        $query->where("o.date_add < '" . pSQL($deadline) . "'");
+
+        $orders = Db::getInstance()->executeS($query);
+
+        if (empty($orders)) {
+            return;
+        }
+
+        $cancelState = (int) Configuration::get('PS_OS_CANCELED');
+
+        foreach ($orders as $orderData) {
+            $orderId = (int) $orderData['id_order'];
+
+            if ($orderId <= 0) {
+                continue;
+            }
+
+            $order = new Order($orderId);
+
+            if (!Validate::isLoadedObject($order) || (int) $order->current_state !== $waitingState) {
+                continue;
+            }
+
+            $orderHistory = new OrderHistory();
+            $orderHistory->id_order = $orderId;
+            $orderHistory->changeIdOrderState($cancelState, $orderId);
+            $orderHistory->addWithemail();
+        }
     }
 }
