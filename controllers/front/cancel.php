@@ -25,6 +25,8 @@
  */
 class Westernbid_Starter_StripeCancelModuleFrontController extends ModuleFrontController
 {
+    private const TOKEN_TTL = 900;
+
     /**
      * {@inheritdoc}
      */
@@ -32,17 +34,20 @@ class Westernbid_Starter_StripeCancelModuleFrontController extends ModuleFrontCo
     {
         // @todo Use a transaction identifier instead, this is just an example
         $id_order = (int) Tools::getValue('id_order');
-        // @todo Use a secure key to avoid illegal access
-
 
         // Order is already saved in PrestaShop
         if (false === empty($id_order)) {
             $order = new Order($id_order);
 
-
             if (false === Validate::isLoadedObject($order)) {
                 // Order not found
                 Tools::redirect($this->context->link->getPageLink('index'));
+            }
+
+            if (false === $this->isRequestAuthorized($order)) {
+                header('HTTP/1.1 403 Forbidden');
+
+                exit;
             }
 
             $orderHistory = new OrderHistory();
@@ -80,5 +85,57 @@ class Westernbid_Starter_StripeCancelModuleFrontController extends ModuleFrontCo
         }
 
         return (int) Configuration::get('PS_OS_ERROR');
+    }
+
+    /**
+     * @param Order $order
+     *
+     * @return bool
+     */
+    private function isRequestAuthorized(Order $order)
+    {
+        $secureKey = (string) Tools::getValue('secure_key');
+
+        if ('' !== $secureKey) {
+            $customer = new Customer((int) $order->id_customer);
+
+            if (Validate::isLoadedObject($customer) && hash_equals($customer->secure_key, $secureKey)) {
+                return true;
+            }
+        }
+
+        $token = (string) Tools::getValue('token');
+        $timestamp = (int) Tools::getValue('timestamp');
+
+        if ('' !== $token && 0 !== $timestamp) {
+            return $this->isValidToken($token, (int) $order->id, $timestamp);
+        }
+
+        return false;
+    }
+
+    /**
+     * @param string $token
+     * @param int $orderId
+     * @param int $timestamp
+     *
+     * @return bool
+     */
+    private function isValidToken($token, $orderId, $timestamp)
+    {
+        $secret = (string) Configuration::get(Westernbid_Starter_Stripe::STARTER_WB_STRIPE_SECRETKEY);
+
+        if ('' === $secret) {
+            return false;
+        }
+
+        if ($timestamp <= 0 || abs(time() - $timestamp) > static::TOKEN_TTL) {
+            return false;
+        }
+
+        $payload = sprintf('%d|%d', $orderId, $timestamp);
+        $expectedToken = hash_hmac('sha256', $payload, $secret);
+
+        return hash_equals($expectedToken, $token);
     }
 }
