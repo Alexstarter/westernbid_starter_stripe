@@ -1,0 +1,20 @@
+{
+    "name": "starter/westernbid-starter-stripe",
+    "description": "WesternBid Stripe payment module compatibility tests",
+    "type": "prestashop-module",
+    "license": "AFL-3.0",
+    "require": {},
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "WesternBid\\StarterStripe\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "WesternBid\\StarterStripe\\Tests\\": "tests/"
+        }
+    }
+}
