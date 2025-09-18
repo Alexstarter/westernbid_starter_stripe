@@ -18,11 +18,11 @@
  * @license   https://opensource.org/licenses/AFL-3.0 Academic Free License 3.0 (AFL-3.0)
  */
 
-/**
- * This Controller simulate an external payment gateway
- */
-class Westernbid_Starter_StripeCallbackModuleFrontController extends ModuleFrontController
+class Westernbid_Starter_StripeWebhookModuleFrontController extends ModuleFrontController
 {
+    /**
+     * {@inheritdoc}
+     */
     public function postProcess()
     {
         $output = Tools::file_get_contents('php://input');
@@ -41,10 +41,22 @@ class Westernbid_Starter_StripeCallbackModuleFrontController extends ModuleFront
             $data = $_POST;
         }
 
-        $data['id_order'] = (int) Tools::getValue('id_order');
+        $result = $this->module->handleWesternbidNotification($data, 'webhook');
 
-        $this->module->handleWesternbidNotification($data, 'callback');
+        header('Content-Type: application/json');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Pragma: no-cache');
 
-        die();
+        if (true === $result['success']) {
+            $statusCode = 200;
+        } else {
+            $statusCode = 400;
+        }
+
+        if (!headers_sent()) {
+            http_response_code($statusCode);
+        }
+
+        die(json_encode($result));
     }
 }
