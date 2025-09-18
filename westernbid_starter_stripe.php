@@ -50,6 +50,9 @@ class Westernbid_Starter_Stripe extends PaymentModule
         'actionValidateOrder',
     ];
 
+    const LOG_FILE_NAME = 'westernbid_starter_stripe.log';
+    const LOG_MAX_CONTEXT_LENGTH = 256;
+
     public function __construct()
     {
         $this->name = 'westernbid_starter_stripe';
@@ -131,6 +134,221 @@ class Westernbid_Starter_Stripe extends PaymentModule
 
 
         return $paymentOptions;
+    }
+
+    /**
+     * Log module-related event to file.
+     *
+     * @param string $event
+     * @param array $context
+     */
+    public function logEvent($event, array $context = [])
+    {
+        $path = $this->getLogFilePath();
+
+        if ('' === $path) {
+            return;
+        }
+
+        $sanitizedContext = $this->sanitizeLogContext($context);
+
+        $entry = [
+            'timestamp' => date(DATE_ATOM),
+            'event' => (string) $event,
+            'context' => $sanitizedContext,
+        ];
+
+        $encoded = json_encode($entry, JSON_UNESCAPED_UNICODE);
+
+        if (false === $encoded) {
+            return;
+        }
+
+        @file_put_contents($path, $encoded . PHP_EOL, FILE_APPEND | LOCK_EX);
+    }
+
+    /**
+     * @param array $filters
+     * @param int $limit
+     *
+     * @return array
+     */
+    public function getLogEntries(array $filters = [], $limit = 200)
+    {
+        $path = $this->getLogFilePath();
+
+        if ('' === $path || !is_readable($path)) {
+            return [];
+        }
+
+        $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        if (false === $lines) {
+            return [];
+        }
+
+        $dateFrom = null;
+        $dateTo = null;
+
+        if (!empty($filters['date_from'])) {
+            try {
+                $dateFrom = new DateTime($filters['date_from'] . ' 00:00:00');
+            } catch (Exception $e) {
+                $dateFrom = null;
+            }
+        }
+
+        if (!empty($filters['date_to'])) {
+            try {
+                $dateTo = new DateTime($filters['date_to'] . ' 23:59:59');
+            } catch (Exception $e) {
+                $dateTo = null;
+            }
+        }
+
+        $orderFilter = 0;
+
+        if (!empty($filters['order_id'])) {
+            $orderFilter = (int) $filters['order_id'];
+        }
+
+        $entries = [];
+
+        foreach (array_reverse($lines) as $line) {
+            $decoded = json_decode($line, true);
+
+            if (!is_array($decoded)) {
+                continue;
+            }
+
+            $timestamp = isset($decoded['timestamp']) ? $decoded['timestamp'] : '';
+
+            if ('' === $timestamp) {
+                continue;
+            }
+
+            try {
+                $entryDate = new DateTime($timestamp);
+            } catch (Exception $e) {
+                continue;
+            }
+
+            if (null !== $dateFrom && $entryDate < $dateFrom) {
+                continue;
+            }
+
+            if (null !== $dateTo && $entryDate > $dateTo) {
+                continue;
+            }
+
+            if ($orderFilter > 0) {
+                $orderId = 0;
+
+                if (isset($decoded['context']['order_id'])) {
+                    $orderId = (int) $decoded['context']['order_id'];
+                }
+
+                if ($orderId !== $orderFilter) {
+                    continue;
+                }
+            }
+
+            $contextData = isset($decoded['context']) && is_array($decoded['context']) ? $decoded['context'] : [];
+            $contextPretty = json_encode($contextData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+            if (false === $contextPretty) {
+                $contextPretty = json_encode($this->sanitizeLogContext($contextData), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            }
+
+            if (false === $contextPretty) {
+                $contextPretty = '[]';
+            }
+
+            $entries[] = [
+                'timestamp' => $timestamp,
+                'event' => isset($decoded['event']) ? (string) $decoded['event'] : '',
+                'context' => $contextData,
+                'context_pretty' => $contextPretty,
+            ];
+
+            if ($limit > 0 && count($entries) >= (int) $limit) {
+                break;
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * @return string
+     */
+    public function getLogFilePath()
+    {
+        if (!defined('_PS_ROOT_DIR_')) {
+            return '';
+        }
+
+        $logDir = _PS_ROOT_DIR_ . '/var/logs';
+
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0775, true);
+        }
+
+        if (!is_dir($logDir) || !is_writable($logDir)) {
+            return '';
+        }
+
+        return $logDir . '/' . static::LOG_FILE_NAME;
+    }
+
+    /**
+     * @param array $context
+     *
+     * @return array
+     */
+    private function sanitizeLogContext(array $context)
+    {
+        $sensitiveKeys = [
+            'secret',
+            'secretkey',
+            'token',
+            'password',
+            'hash',
+            'signature',
+            'payload',
+            'wb_hash',
+            'secure_key',
+        ];
+
+        $sanitized = [];
+
+        foreach ($context as $key => $value) {
+            $normalizedKey = Tools::strtolower((string) $key);
+
+            if (in_array($normalizedKey, $sensitiveKeys)) {
+                $sanitized[$key] = '[hidden]';
+
+                continue;
+            }
+
+            if (is_array($value)) {
+                $sanitized[$key] = $this->sanitizeLogContext($value);
+
+                continue;
+            }
+
+            if (is_object($value)) {
+                $value = '[object ' . get_class($value) . ']';
+            }
+
+            if (is_string($value) && Tools::strlen($value) > static::LOG_MAX_CONTEXT_LENGTH) {
+                $value = Tools::substr($value, 0, static::LOG_MAX_CONTEXT_LENGTH) . '…';
+            }
+
+            $sanitized[$key] = $value;
+        }
+
+        return $sanitized;
     }
 
 
@@ -562,6 +780,11 @@ class Westernbid_Starter_Stripe extends PaymentModule
         if ($autoCancelHours <= 0) {
             if ($logWhenEmpty) {
                 PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel skipped (%s): feature disabled', $contextName));
+                $this->logEvent('auto_cancel', [
+                    'status' => 'skipped',
+                    'context' => $contextName,
+                    'reason' => 'feature_disabled',
+                ]);
             }
 
             return [
@@ -576,6 +799,11 @@ class Westernbid_Starter_Stripe extends PaymentModule
         if ($waitingState <= 0) {
             if ($logWhenEmpty) {
                 PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel skipped (%s): waiting state missing', $contextName));
+                $this->logEvent('auto_cancel', [
+                    'status' => 'skipped',
+                    'context' => $contextName,
+                    'reason' => 'waiting_state_missing',
+                ]);
             }
 
             return [
@@ -599,6 +827,12 @@ class Westernbid_Starter_Stripe extends PaymentModule
         if (empty($orders)) {
             if ($logWhenEmpty) {
                 PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel processed (%s): no orders to cancel', $contextName));
+                $this->logEvent('auto_cancel', [
+                    'status' => 'success',
+                    'context' => $contextName,
+                    'cancelled' => 0,
+                    'message' => 'No orders to cancel',
+                ]);
             }
 
             return [
@@ -638,8 +872,20 @@ class Westernbid_Starter_Stripe extends PaymentModule
 
         if (!empty($cancelledOrders)) {
             PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel processed (%s): cancelled orders %s', $contextName, implode(', ', $cancelledOrders)));
+            $this->logEvent('auto_cancel', [
+                'status' => 'success',
+                'context' => $contextName,
+                'cancelled' => count($cancelledOrders),
+                'orders' => $cancelledOrders,
+            ]);
         } elseif ($logWhenEmpty) {
             PrestaShopLogger::addLog(sprintf('[WesternBid Stripe] Auto cancel processed (%s): no orders cancelled (possibly updated meanwhile)', $contextName));
+            $this->logEvent('auto_cancel', [
+                'status' => 'success',
+                'context' => $contextName,
+                'cancelled' => 0,
+                'message' => 'No orders cancelled (possibly updated meanwhile)',
+            ]);
         }
 
         return [

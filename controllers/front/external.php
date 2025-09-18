@@ -128,6 +128,14 @@ class Westernbid_Starter_StripeExternalModuleFrontController extends ModuleFront
         $orderName = 'Order #' . $orderId;
         $invoice = $orderId;
 
+        $this->module->logEvent('order_created', [
+            'order_id' => (int) $orderId,
+            'cart_id' => (int) $this->context->cart->id,
+            'customer_id' => (int) $customer->id,
+            'amount' => Tools::ps_round($total, 2),
+            'currency' => $currency->iso_code,
+        ]);
+
 
         $wb_hash = md5($wb_login.$secret_key.$amount.$invoice);
 
@@ -165,6 +173,14 @@ class Westernbid_Starter_StripeExternalModuleFrontController extends ModuleFront
             'cancel_url' => $cancel_url,
             'return_url' => $success_url,
             'callback_url' => $callback_url,
+        ]);
+
+        $this->module->logEvent('redirect_to_westernbid', [
+            'order_id' => (int) $orderId,
+            'amount' => Tools::ps_round($amount, 2),
+            'currency' => $currency->iso_code,
+            'return_url' => $success_url,
+            'cancel_url' => $cancel_url,
         ]);
 
         $this->setTemplate('module:westernbid_starter_stripe/views/templates/front/external.tpl');
